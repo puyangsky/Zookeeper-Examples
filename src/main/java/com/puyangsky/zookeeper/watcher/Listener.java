@@ -1,17 +1,15 @@
-package com.puyangsky.zookeeper;
+package com.puyangsky.zookeeper.watcher;
 
+import com.puyangsky.zookeeper.ClientFactory;
 import org.apache.curator.framework.CuratorFramework;
-import org.apache.curator.framework.api.CuratorListener;
 import org.apache.curator.framework.recipes.cache.TreeCache;
-import org.apache.curator.framework.recipes.cache.TreeCacheEvent;
-import org.apache.curator.framework.recipes.cache.TreeCacheListener;
 import org.apache.zookeeper.data.Stat;
 
 /**
  * Author:      puyangsky
  * Date:        17/9/12 下午2:13
  */
-public class Main {
+public class Listener {
 
     private static CuratorFramework client = ClientFactory.newClient("127.0.0.1", 2181);
     private static final String PATH = "/crud";
