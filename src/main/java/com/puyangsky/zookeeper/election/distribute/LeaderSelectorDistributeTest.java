@@ -1,7 +1,9 @@
 package com.puyangsky.zookeeper.election.distribute;
 
 import com.puyangsky.zookeeper.ClientFactory;
+import com.puyangsky.zookeeper.util.Config;
 import com.puyangsky.zookeeper.util.RedisTool;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.leader.LeaderSelector;
 import org.apache.curator.framework.recipes.leader.LeaderSelectorListener;
@@ -9,8 +11,6 @@ import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.utils.CloseableUtils;
 
 import java.util.Scanner;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -18,21 +18,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Date:        2017/11/20 下午8:23
  */
 public class LeaderSelectorDistributeTest {
-    private static final String PATH = "/test/leader";
-    // ThreadLocal变量记录当前线程是否为master
-//    private static ThreadLocal<Boolean> isMaster = ThreadLocal.withInitial(() -> false);
-    private static boolean electionFinished;
 
     //消费者队列
-    private static LinkedBlockingQueue<String> consumeQueue = new LinkedBlockingQueue<>();
-
     private static void election(String threadName, AtomicBoolean isMaster) {
         CuratorFramework client = null;
         LeaderSelector leaderSelector = null;
         try {
             client = ClientFactory.newClient(Config.HOST, Config.PORT);
             client.start();
-            leaderSelector = new LeaderSelector(client, PATH, new LeaderSelectorListener() {
+            leaderSelector = new LeaderSelector(client, Config.PATH, new LeaderSelectorListener() {
                 @Override
                 public void takeLeadership(CuratorFramework curatorFramework) throws Exception {
                     // TODO 执行master操作，生成metadata，填充消费队列
@@ -44,16 +38,23 @@ public class LeaderSelectorDistributeTest {
                         String line = scanner.nextLine();
                         if (line.equals("bye")) {
                             System.out.println(String.format("[%s]: Release leadership", threadName));
+                            isMaster.set(false);
+                            RedisTool.set(Config.ELECTION_KEY, "false");
                             break;
                         }else {
-                            consumeQueue.offer(line);
+                            //填充消费队列
+                            System.out.println("push into " + Config.QUEUE_KEY + line);
+                            RedisTool.lpush(Config.QUEUE_KEY, line);
                         }
                     }
-                    isMaster.set(false);
-                    RedisTool.set(Config.ELECTION_KEY, "false");
                 }
                 @Override
-                public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {}
+                public void stateChanged(CuratorFramework curatorFramework, ConnectionState connectionState) {
+                    if (connectionState == ConnectionState.LOST || connectionState == ConnectionState.SUSPENDED) {
+                        System.out.println(threadName + ": lost");
+                        // TODO 做出应对策略
+                    }
+                }
             });
             //释放leadership后还可以参与选主
             leaderSelector.autoRequeue();
@@ -62,6 +63,7 @@ public class LeaderSelectorDistributeTest {
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
+//            RedisTool.set(Config.ELECTION_KEY, "false");
             CloseableUtils.closeQuietly(client);
             CloseableUtils.closeQuietly(leaderSelector);
         }
@@ -73,16 +75,18 @@ public class LeaderSelectorDistributeTest {
      */
     private static void slaverWork(String threadName, AtomicBoolean isMaster) {
         while (true) {
-            electionFinished = Boolean.parseBoolean(RedisTool.get(Config.ELECTION_KEY));
+            String value = RedisTool.get(Config.ELECTION_KEY);
+            boolean electionFinished = StringUtils.isNotEmpty(value) && Boolean.parseBoolean(value);
             if (electionFinished && !isMaster.get()) {
-                System.out.println(threadName + ": test");
-                System.out.println(String.format("%s: begin slave work", threadName));
-                String url = null;
-                try {
-                    url = consumeQueue.poll(1, TimeUnit.MINUTES);
+                String url = RedisTool.rpop(Config.QUEUE_KEY);
+                if (StringUtils.isNotEmpty(url)) {
                     System.out.println(String.format("%s: consumes %s", threadName, url));
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                }else {
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
             }
         }

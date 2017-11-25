@@ -1,4 +1,4 @@
-package com.puyangsky.zookeeper.election.distribute;
+package com.puyangsky.zookeeper.util;
 
 /**
  * Author:      puyangsky
@@ -8,4 +8,6 @@ public interface Config {
     String HOST = "localhost";
     int PORT = 2181;
     String ELECTION_KEY = "ELECTION_KEY";
+    String PATH = "/test/leader";
+    String QUEUE_KEY = "QUEUE_KEY";
 }
